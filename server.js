@@ -1,7 +1,7 @@
 
 var _url = require('url');
 var _http = require('http');
-var _mysql = require('node-mysql');
+
 
 handler = function(req, res) {
     
