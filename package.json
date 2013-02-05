@@ -1,0 +1,11 @@
+﻿{
+    "name": "notepanel-services",
+    "version": "0.0.1",
+    "dependencies" : {
+        "node-mysql" : "*"
+    },
+    "license": "MIT",
+    "engines": {
+        "node": ">=0.8"
+    }
+}
