@@ -3,8 +3,6 @@ var _url = require('url');
 var _http = require('http');
 var _mysql = require('node-mysql');
 
-var port = process.env.PORT || 80;
-
 handler = function(req, res) {
     
     res.setHeader('Content-Type' : 'application/json');
@@ -63,4 +61,4 @@ var allowCrossDomain = function (req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-_http.createServer(handler).listen(port);
+_http.createServer(handler).listen(80);
