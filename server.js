@@ -9,7 +9,9 @@ var handler = function (req, res) {
     var handled = false;
 
     res.statusCode = 200;
-    res.end(JSON.stringify({success: false}));
+    res.write(JSON.stringify({success: false}));
+
+    res.end();
 };
 
 _http.createServer(handler).listen(80);
