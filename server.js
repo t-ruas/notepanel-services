@@ -1,7 +1,5 @@
 
-var _url = require('url');
-var _http = require('http');
-var _mysql = require('node-mysql');
+var http = require('http');
 
 var handler = function (req, res) {
     res.setHeader('Content-Type' : 'application/json');
@@ -9,4 +7,4 @@ var handler = function (req, res) {
     res.end(JSON.stringify({success: false}));
 };
 
-_http.createServer(handler).listen(process.env.PORT);
+http.createServer(handler).listen(process.env.PORT);
