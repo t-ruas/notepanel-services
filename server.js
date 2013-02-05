@@ -27,16 +27,11 @@ handler = function(req, res) {
                 }
                 break;
             case 'auth':
-                switch () {
+                switch (path[path.length - 1]) {
                     case 'identify':
                         handled = true;
 
-                        var client = new _mysql.Client();
-                        client.user = 'root';
-                        client.password = '';
-                        client.connect();
-                        
-                        var connection = mysql.createConnection(os.environ["MYSQLCONNSTR_APP"]);
+                        var connection = _mysql.createConnection(os.environ["MYSQLCONNSTR_APP"]);
                         connection.connect();
 
                         connection.query('SELECT * FROM user;', function(err, rows, fields) {
