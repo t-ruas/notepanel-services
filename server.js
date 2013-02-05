@@ -8,4 +8,4 @@ var handler = function (req, res) {
     res.end();
 };
 
-_http.createServer(handler).listen(80);
+_http.createServer(handler).listen(process.env.PORT);
