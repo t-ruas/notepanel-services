@@ -39,10 +39,15 @@ var handler = function (req, res) {
                     case 'identify':
                         handled = true;
 
-                        var cobj = parseConnectionString(process.env["MYSQLCONNSTR_notepanel"]);
-                        res.write(JSON.stringify(cobj));
+                        var cs = parseConnectionString(process.env["MYSQLCONNSTR_notepanel"]);
 
-                        var connection = _mysql.createConnection(cobj);
+                        var connection = _mysql.createConnection({
+                            host: cs["Data Source"],
+                            user: cs["User Id"],
+                            password: cs["Password"],
+                            database: cs["Data Source"]
+                        });
+
                         connection.connect();
 
                         connection.query('SELECT * FROM user;', function(err, rows, fields) {
