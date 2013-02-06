@@ -29,7 +29,7 @@ var handler = function (req, res) {
                     case 'identify':
                         handled = true;
 
-                        var connection = _mysql.createConnection(os.environ["MYSQLCONNSTR_APP"]);
+                        var connection = _mysql.createConnection(process.env["MYSQLCONNSTR_APP"]);
                         connection.connect();
 
                         connection.query('SELECT * FROM user;', function(err, rows, fields) {
