@@ -29,9 +29,14 @@ var handler = function (req, res) {
                     case 'identify':
                         handled = true;
 
-                        res.write(process.env["MYSQLCONNSTR_notepanel"]);
-
-                        var connection = _mysql.createConnection(process.env["MYSQLCONNSTR_notepanel"]);
+                        var cstr = process.env["MYSQLCONNSTR_notepanel"].split(';');
+                        var cobj = {};
+                        for (var i = 0, imax = cstr.length; i < imax; i++) {
+                            var parts = cstr[i].split('=');
+                            cobj[parts[0]] = parts[1];
+                        }
+                        
+                        var connection = _mysql.createConnection(cobj);
                         connection.connect();
 
                         connection.query('SELECT * FROM user;', function(err, rows, fields) {
