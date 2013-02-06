@@ -44,8 +44,7 @@ var handler = function (req, res) {
                         var connection = _mysql.createConnection({
                             host: cs["Data Source"],
                             user: cs["User Id"],
-                            password: cs["Password"],
-                            database: cs["Data Source"]
+                            password: cs["Password"]
                         });
 
                         connection.connect();
