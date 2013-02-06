@@ -65,7 +65,7 @@ var handler = function (req, res) {
                                         if (rows.length > 0) {
                                             body.identified = true;
                                             body.user = rows[0];
-                                            cookies.set('notepanel_services_user', body.user['id'], {signed: true});
+                                            _cookies.set('notepanel_services_user', body.user['id'], {signed: true});
                                         }
                                     }
                                     res.end(JSON.stringify(body));
@@ -75,7 +75,7 @@ var handler = function (req, res) {
                         case 'identify':
                             handled = true;
                             var body = {};
-                            var cookie = cookies.get('notepanel_services_user', {signed: true});
+                            var cookie = _cookies.get('notepanel_services_user', {signed: true});
                             if (cookie) {
                                 var cnx = getMySqlConnection();
                                 cnx.connect();
