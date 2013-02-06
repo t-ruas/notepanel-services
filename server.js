@@ -3,6 +3,16 @@ var _url = require('url');
 var _http = require('http');
 var _mysql = require('mysql');
 
+var parseConnectionString = function (str) {
+    var parts = str.split(';');
+    var obj = {};
+    for (var i = 0, imax = parts.length; i < imax; i++) {
+        var kv = parts[i].split('=');
+        obj[kv[0]] = kv[1];
+    }
+    return obj;
+};
+
 var handler = function (req, res) {
 
     res.setHeader('Content-Type', 'application/json');
@@ -29,13 +39,9 @@ var handler = function (req, res) {
                     case 'identify':
                         handled = true;
 
-                        var cstr = process.env["MYSQLCONNSTR_notepanel"].split(';');
-                        var cobj = {};
-                        for (var i = 0, imax = cstr.length; i < imax; i++) {
-                            var parts = cstr[i].split('=');
-                            cobj[parts[0]] = parts[1];
-                        }
-                        
+                        var cobj = parseConnectionString(process.env["MYSQLCONNSTR_notepanel"]);
+                        res.write(JSON.stringify(cobj));
+
                         var connection = _mysql.createConnection(cobj);
                         connection.connect();
 
