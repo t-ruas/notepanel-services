@@ -2,6 +2,7 @@
 var _url = require('url');
 var _http = require('http');
 var _mysql = require('mysql');
+var _cookies = require('cookies');
 
 var parseConnectionString = function (str) {
     var parts = str.split(';');
@@ -13,6 +14,16 @@ var parseConnectionString = function (str) {
     return obj;
 };
 
+var getMySqlConnection = function () {
+    var cs = parseConnectionString(process.env["MYSQLCONNSTR_notepanel"]);
+    return _mysql.createConnection({
+        host: cs["Data Source"],
+        user: cs["User Id"],
+        password: cs["Password"],
+        database: cs["Database"]
+    });
+};
+
 var handler = function (req, res) {
 
     res.setHeader('Content-Type', 'application/json');
@@ -21,48 +32,69 @@ var handler = function (req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     var handled = false;
+    res.statusCode = 200;
+    
+    path = _url.parse(req.url, true).pathname.split('/');
 
-    path = _url.parse(req.url).pathname.split('/');
-
-    if (path.length >= 2) {
-        switch (path[path.length - 2]) {
-            case 'board':
-                switch (path[path.length - 1]) {
-                    case 'add':
-                        break;
-                    case 'poll':
-                        break;
+    if (path.length > 0) {
+        switch (path[0]) {
+            case 'boards':
+                if (path.length > 1) {
+                    switch (path[1]) {
+                        case 'poll':
+                            break;
+                    }
                 }
                 break;
-            case 'auth':
-                switch (path[path.length - 1]) {
-                    case 'identify':
-                        handled = true;
-
-                        var cs = parseConnectionString(process.env["MYSQLCONNSTR_notepanel"]);
-
-                        var connection = _mysql.createConnection({
-                            host: cs["Data Source"],
-                            user: cs["User Id"],
-                            password: cs["Password"],
-                            database: cs["Database"]
-                        });
-
-                        connection.connect();
-
-                        connection.query('SELECT * FROM user;', function(err, rows, fields) {
+            case 'users':
+                if (path.length > 1) {
+                    switch (path[1]) {
+                        case 'login':
+                            handled = true;
                             var body = {};
-                            body.sucess = true;
-                            body.err = err;
-                            body.rows = rows;
-                            body.fields = fields;
-                            res.statusCode = 200;
-                            res.end(JSON.stringify(body));
-                        });
-
-                        connection.end();
-
-                        break;
+                            var cnx = getMySqlConnection();
+                            cnx.connect();
+                            cnx.query(
+                                'SELECT id, email, name FROM user WHERE name = ? AND MD5(password) = ?;',
+                                [path.query.username, path.query.password],
+                                function(err, rows, fields) {
+                                    if (err) {
+                                        body.success = false;
+                                    } else {
+                                        body.success = true;
+                                        if (rows.length > 0) {
+                                            body.identified = true;
+                                            body.user = rows[0];
+                                            cookies.set('notepanel_services_user', body.user['id'], {signed: true});
+                                        }
+                                    }
+                                    res.end(JSON.stringify(body));
+                                });
+                            cnx.end();
+                            break;
+                        case 'identify':
+                            handled = true;
+                            var body = {};
+                            var cookie = cookies.get('notepanel_services_user', {signed: true});
+                            if (cookie) {
+                                var cnx = getMySqlConnection();
+                                cnx.connect();
+                                cnx.query('SELECT id, email, name FROM user WHERE id = ?;', [cookie], function(err, rows, fields) {
+                                    if (err) {
+                                        body.success = false;
+                                    } else {
+                                        body.success = true;
+                                        if (rows.length > 0) {
+                                            body.identified = true;
+                                            body.user = rows[0];
+                                        }
+                                    }
+                                    res.end(JSON.stringify(body));
+                                });
+                                cnx.end();
+                            }
+                            break;
+                    }
                 }
                 break;
         }
@@ -70,7 +102,7 @@ var handler = function (req, res) {
 
     if (!handled) {
         res.statusCode = 404;
-        res.end(JSON.stringify({success: false}));
+        res.end();
     }
 };
 
