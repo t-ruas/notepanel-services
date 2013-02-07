@@ -79,6 +79,7 @@ var handleRequest = function (context) {
         {pattern: /^\/users$/g, method: 'POST', handler: onUsers},
         {pattern: /^\/boards\/poll$/g, method: 'GET', handler: onBoardsPoll},
         {pattern: /^\/notes$/g, method: 'POST', handler: onNotes},
+        {pattern: /^\/logs\/list$/g, method: 'GET', handler: onListLogs}
     ];
 
     for (var i = 0, imax = routes.length; i < imax; i++) {
@@ -207,6 +208,17 @@ var onNotes = function (context, callback) {
             }
         });
     cnx.end();
+};
+
+var onListLogs = function (context, callback) {
+    logger.query(null,
+        function (error, results) {
+            if (error) {
+                callback(error);
+            } else {
+                callback(null, {code: 200, message: results});
+            }
+        });
 };
 
 var onBoardsPoll = function (context, callback) {
