@@ -4,6 +4,7 @@ var _cookies = require('cookies');
 var _keygrip = require('keygrip');
 var _data = require('./data.js');
 var _winston = require('winston');
+var _moment = require('moment');
 
 var settings = {
     connectionString: process.env['MYSQLCONNSTR_notepanel'] || 'Data Source=localhost;User Id=root;Password=;Database=notepanel',
@@ -18,7 +19,7 @@ exports.settings = settings;
 var logger = new _winston.Logger({
     transports: [
         new _winston.transports.Console({timestamp: true}),
-        new _winston.transports.File({filename: 'log.txt'})
+        new _winston.transports.File({filename: _moment().format('YYYYMMDD') + '.log'})
     ]
 });
 exports.logger = logger;

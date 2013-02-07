@@ -6,6 +6,7 @@
         "cookies": "*",
         "keygrip": "*",
         "azure": "*",
-        "winston": "*"
+        "winston": "*",
+        "moment": "*"
     }
 }
