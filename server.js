@@ -5,6 +5,7 @@ var _keygrip = require('keygrip');
 var _data = require('./data.js');
 var _winston = require('winston');
 var _moment = require('moment');
+//var _events = require('events');
 
 var settings = {
     connectionString: process.env['MYSQLCONNSTR_notepanel'] || 'Data Source=localhost;User Id=root;Password=;Database=notepanel',
@@ -46,7 +47,7 @@ var listener = function (request, response) {
         context.body += chunk;
     });
 
-    request.addListener("end", function () {
+    request.addListener('end', function () {
 
         response.setHeader('content-type', 'application/json');
         response.setHeader('access-control-allow-origin', '*');
@@ -63,13 +64,13 @@ var listener = function (request, response) {
 };
 
 var handleRequest = function (context) {
-
-    process.on('uncaughtException', function (error) {
+/*
+    process.addListener('uncaughtException', function (error) {
         logger.error('uncaught exception: ' + error);
         context.response.statusCode = 500;
         context.response.end(JSON.stringify({text: error}));
     });
-
+*/
     var handled = false;
 
     var routes = [
@@ -78,8 +79,9 @@ var handleRequest = function (context) {
         {pattern: /^\/users\/identify$/g, method: 'GET', handler: onUsersIdentify},
         {pattern: /^\/users$/g, method: 'POST', handler: onUsers},
         {pattern: /^\/boards\/poll$/g, method: 'GET', handler: onBoardsPoll},
-        {pattern: /^\/notes$/g, method: 'POST', handler: onNotes},
-        {pattern: /^\/logs\/list$/g, method: 'GET', handler: onListLogs}
+        {pattern: /^\/notes$/g, method: 'POST', handler: onPostNotes},
+        {pattern: /^\/notes$/g, method: 'GET', handler: onGetNotes},
+        {pattern: /^\/logs$/g, method: 'GET', handler: onGetLogs}
     ];
 
     for (var i = 0, imax = routes.length; i < imax; i++) {
@@ -196,21 +198,44 @@ var onUsersIdentify = function (context, callback) {
     }
 };
 
-var onNotes = function (context, callback) {
+var onGetNotes = function (context, callback) {
+    var boardId = context.path.query.boardId;
+    // get the cache version now rather than on callback
+    // better to have to replay some updates than miss the ones occuring between the select and the callback
+    var version = boardVersioning.getCache(boardId).version;
     var cnx = _data.getMySqlConnection();
     cnx.connect();
-    _data.saveNote(cnx, context.content,
+    _data.listNotesByBoardId(cnx, boardId,
         function(error, result) {
             if (error) {
                 callback(error);
             } else {
-                callback(null, {code: 200, message: {id: result}});
+                callback(null, {code: 200, message: {notes: result, version: version}});
             }
         });
+        
     cnx.end();
 };
 
-var onListLogs = function (context, callback) {
+var onPostNotes = function (context, callback) {
+    var note = context.content;
+    var cnx = _data.getMySqlConnection();
+    cnx.connect();
+    _data.saveNote(cnx, note,
+        function(error, result) {
+            if (error) {
+                callback(error);
+            } else {
+                note.id = result;
+                boardVersioning.update(note);
+                callback(null, {code: 200, message: {id: note.id}});
+            }
+        });
+        
+    cnx.end();
+};
+
+var onGetLogs = function (context, callback) {
     logger.query(null,
         function (error, results) {
             if (error) {
@@ -222,7 +247,69 @@ var onListLogs = function (context, callback) {
 };
 
 var onBoardsPoll = function (context, callback) {
-    callback(null, {code: 200, message: {}});
+    var boardId = context.path.query.boardId;
+    var version = context.path.query.version;
+    var updates = boardVersioning.getUpdates(boardId, version);
+    if (updates.length) {
+        callback(null, {code: 200, message: updates});
+    } else {
+        var client = {
+            callback: callback
+        };
+        boardVersioning.getCache(boardId).clients.push(client);
+        /*context.request.addListener('close', function ()
+        {
+        });*/
+    }
+};
+
+var boardVersioning = {
+    queueSize: 10,
+    cache: {},
+
+    getCache: function (boardId) {
+        if (!(boardId in boardVersioning.cache)) {
+            boardVersioning.cache[boardId] = {
+                version: 0,
+                updates: [],
+                clients: []
+            };
+        }
+        return boardVersioning.cache[boardId];
+    },
+    
+    update: function (note) {
+        var cache = boardVersioning.getCache(note.boardId)
+        cache.version++;
+        var update = {
+            version: cache.version,
+            note: note
+        };
+        if (cache.updates.length === boardVersioning.queueSize) {
+            cache.updates.shift();
+        }
+        cache.updates.push(update);
+        var updates = [update];
+        for (var i = 0, imax = cache.clients.length; i < imax; i++) {
+            cache.clients[i].callback(null, {code: 200, message: updates});
+        }
+        cache.clients.length = 0;
+    },
+
+    getUpdates: function (boardId, version) {
+        var list = [];
+        var cache = boardVersioning.getCache(boardId);
+        if (cache.version > version) {
+            for (var i = cache.updates.length - 1; i >= 0; i--) {
+                if (cache.updates[i].version > version) {
+                    list.push(cache.updates[i])
+                } else {
+                    break;
+                }
+            }
+        }
+        return list;
+    }
 };
 
 _http.createServer(listener).listen(settings.port);

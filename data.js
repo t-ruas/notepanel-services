@@ -116,3 +116,17 @@ var saveNote = function (cnx, note, callback) {
     }
 };
 exports.saveNote = saveNote;
+
+var listNotesByBoardId = function (cnx, boardId, callback) {
+    cnx.query('SELECT id, board_id AS boardId, text, x, y, color FROM note WHERE board_id = ?;',
+            [boardId],
+        function(error, rows, fields) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback(null, rows);
+            }
+        });
+};
+
+exports.listNotesByBoardId = listNotesByBoardId;
