@@ -62,6 +62,13 @@ var listener = function (request, response) {
 };
 
 var handleRequest = function (context) {
+
+    process.on('uncaughtException', function (error) {
+        logger.error('uncaught exception: ' + error);
+        context.response.statusCode = 500;
+        context.response.end(JSON.stringify({text: error}));
+    });
+
     var handled = false;
 
     var routes = [

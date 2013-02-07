@@ -18,3 +18,17 @@
 {"level":"info","message":"saving note undefined","timestamp":"2013-02-07T11:16:09.675Z"}
 {"level":"info","message":"insert","timestamp":"2013-02-07T11:16:09.676Z"}
 {"level":"info","message":"{\"fieldCount\":0,\"affectedRows\":1,\"insertId\":5,\"serverStatus\":2,\"warningCount\":1,\"message\":\"\",\"changedRows\":0}","timestamp":"2013-02-07T11:16:09.681Z"}
+{"level":"warn","message":"not found : /favicon.ico","timestamp":"2013-02-07T11:22:56.088Z"}
+{"level":"warn","message":"not found : /favicon.ico","timestamp":"2013-02-07T11:22:57.416Z"}
+{"level":"warn","message":"not found : /favicon.ico","timestamp":"2013-02-07T11:22:58.726Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.758Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.773Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.773Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.774Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.774Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.774Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:23:01.774Z"}
+{"level":"warn","message":"not found : /favicon.ico","timestamp":"2013-02-07T11:23:24.474Z"}
+{"level":"warn","message":"not found : /favicon.ico","timestamp":"2013-02-07T11:23:27.087Z"}
+{"level":"error","message":"uncaught exception: test","timestamp":"2013-02-07T11:24:31.172Z"}
+{"level":"warn","message":"not found : /favicon.ico","timestamp":"2013-02-07T11:24:31.196Z"}
