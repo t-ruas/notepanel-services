@@ -3,7 +3,7 @@ var _http = require('http');
 var _cookies = require('cookies');
 var _keygrip = require('keygrip');
 var _data = require('./data.js');
-var _querystring = require('querystring');
+var _winston = require('winston');
 
 var settings = {
     connectionString: process.env['MYSQLCONNSTR_notepanel'] || 'Data Source=localhost;User Id=root;Password=;Database=notepanel',
@@ -13,6 +13,15 @@ var settings = {
         'vfvcvwxcvwxcvwxcv'
     ]
 };
+exports.settings = settings;
+
+var logger = new _winston.Logger({
+    transports: [
+        new _winston.transports.Console({timestamp: true}),
+        new _winston.transports.File({filename: 'log.txt'})
+    ]
+});
+exports.logger = logger;
 
 var setCurrentUserId = function (cookies, userId) {
     cookies.set('notepanel_services_user', userId, {signed: true});
@@ -35,44 +44,46 @@ var listener = function (request, response) {
     request.addListener('data', function (chunk) {
         context.body += chunk;
     });
-    
+
     request.addListener("end", function () {
-        
-        response.setHeader('Content-Type', 'application/json');
-        response.setHeader('Access-Control-Allow-Origin', '*');
-        response.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE');
-        response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+        response.setHeader('content-type', 'application/json');
+        response.setHeader('access-control-allow-origin', '*');
+        response.setHeader('access-control-allow-methods', 'GET, PUT, POST, DELETE');
+        response.setHeader('access-control-allow-headers', 'content-type, accept');
+        response.setHeader('access-control-max-age', 10);
 
         if (context.body.length > 0) {
-            context.content = _querystring.parse(context.body);
+            context.content = JSON.parse(context.body);
         }
-        
+
         handleRequest(context);
     });
 };
 
 var handleRequest = function (context) {
     var handled = false;
-    
+
     var routes = [
         {pattern: /^\/users\/login$/g, method: 'GET', handler: onUsersLogin},
         {pattern: /^\/users\/logout$/g, method: 'GET', handler: onUsersLogout},
         {pattern: /^\/users\/identify$/g, method: 'GET', handler: onUsersIdentify},
+        {pattern: /^\/users$/g, method: 'POST', handler: onUsers},
         {pattern: /^\/boards\/poll$/g, method: 'GET', handler: onBoardsPoll},
-        {pattern: /^\/notes$/g, method: 'POST', handler: onNotes}
+        {pattern: /^\/notes$/g, method: 'POST', handler: onNotes},
     ];
 
     for (var i = 0, imax = routes.length; i < imax; i++) {
-        if (context.path.pathname.match(routes[i].pattern) && routes[i].method === context.request.method) {
+        if (routes[i].method === context.request.method && context.path.pathname.match(routes[i].pattern)) {
             routes[i].handler(context, function (error, result) {
                 if (error) {
+                    logger.error(error);
                     context.response.statusCode = 500;
-                    context.response.write(JSON.stringify({success: false, message: error}));
+                    context.response.end(JSON.stringify(error));
                 } else {
-                    context.response.statusCode = 200;
-                    context.response.write(JSON.stringify({success: true, message: result}));
+                    context.response.statusCode = result.code;
+                    context.response.end(JSON.stringify(result.message));
                 }
-                context.response.end();
             });
             handled = true;
             break;
@@ -80,6 +91,7 @@ var handleRequest = function (context) {
     }
 
     if (!handled) {
+        logger.warn('not found : ' + context.request.url);
         context.response.statusCode = 404;
         context.response.end();
     }
@@ -94,25 +106,43 @@ var onUsersLogin = function (context, callback) {
                 cnx.end();
                 callback(error);
             } else {
+                var message = {};
                 if (result) {
                     setCurrentUserId(context.cookies, result['id']);
-                    var message = {identified: true, user: result};
+                    message.user = result;
                     _data.listBoardsByUserId(cnx, message.user.id,
                         function(error, result) {
                             if (error) {
                                 callback(error);
                             } else {
                                 message.boards = result;
-                                callback(null, message);
+                                callback(null, {code: 200, message: message});
                             }
                         });
+                    _data.updateUserLoginDate(cnx, message.user.id,
+                        function(error, result) {});
                     cnx.end();
                 } else {
                     cnx.end();
-                    callback(null, {identified: false});
+                    callback(null, {code: 403});
                 }
             }
         });
+};
+
+var onUsers = function (context, callback) {
+    var cnx = _data.getMySqlConnection();
+    cnx.connect();
+    _data.saveUser(cnx, context.content,
+        function(error, result) {
+            if (error) {
+                callback(error);
+            } else {
+                setCurrentUserId(context.cookies, result);
+                callback(null, {code: 200, message: {id: result}});
+            }
+        });
+    cnx.end();
 };
 
 var onUsersLogout = function (context, callback) {
@@ -120,7 +150,7 @@ var onUsersLogout = function (context, callback) {
     if (userId) {
         setCurrentUserId(context.cookies);
     }
-    callback(null, {identified: false});
+    callback(null, {code: 200});
 };
 
 var onUsersIdentify = function (context, callback) {
@@ -135,26 +165,25 @@ var onUsersIdentify = function (context, callback) {
                     callback(error);
                 } else {
                     if (result) {
-                        var message = {identified: true, user: result};
+                        var message = {user: result};
                         _data.listBoardsByUserId(cnx, message.user.id,
                             function(error, result) {
                                 if (error) {
                                     callback(error);
                                 } else {
                                     message.boards = result;
-                                    callback(null, message);
+                                    callback(null, {code: 200, message: message});
                                 }
                             });
                         cnx.end();
                     } else {
                         cnx.end();
-                        callback(null, {identified: false});
+                        callback(null, {code: 403});
                     }
                 }
-                
             });
     } else {
-        callback(null, {identified: false});
+        callback(null, {code: 403});
     }
 };
 
@@ -166,17 +195,14 @@ var onNotes = function (context, callback) {
             if (error) {
                 callback(error);
             } else {
-                callback(null, {id: result});
+                callback(null, {code: 200, message: {id: result}});
             }
         });
     cnx.end();
 };
 
 var onBoardsPoll = function (context, callback) {
-    var message = {};
-    callback(null, message);
+    callback(null, {code: 200, message: {}});
 };
 
 _http.createServer(listener).listen(settings.port);
-
-exports.settings = settings;

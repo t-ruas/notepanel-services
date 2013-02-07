@@ -20,6 +20,7 @@ var getMySqlConnection = function () {
         database: cs["Database"]
     });
 };
+exports.getMySqlConnection = getMySqlConnection;
 
 var getUserById = function (cnx, id, callback) {
     cnx.query('SELECT id, email, name FROM user WHERE id = ?;',
@@ -32,6 +33,7 @@ var getUserById = function (cnx, id, callback) {
             }
         });
 };
+exports.getUserById = getUserById;
 
 var getUserByNameAndPassword = function (cnx, name, password, callback) {
     cnx.query('SELECT id, email, name FROM user WHERE name = ? AND password = MD5(?);',
@@ -44,6 +46,20 @@ var getUserByNameAndPassword = function (cnx, name, password, callback) {
             }
         });
 };
+exports.getUserByNameAndPassword = getUserByNameAndPassword;
+
+var updateUserLoginDate = function (cnx, userId, callback) {
+    cnx.query('UPDATE user SET last_seen_date = NOW() WHERE id = ?;',
+            [userId],
+        function(error, result) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback();
+            }
+        });
+};
+exports.updateUserLoginDate = updateUserLoginDate;
 
 var listBoardsByUserId = function (cnx, userId, callback) {
     cnx.query('SELECT b.id, b.name FROM board AS b JOIN board_user AS bu ON bu.board_id = b.id AND bu.user_id = ?;',
@@ -56,15 +72,29 @@ var listBoardsByUserId = function (cnx, userId, callback) {
             }
         });
 };
+exports.listBoardsByUserId = listBoardsByUserId;
+
+var saveUser = function (cnx, user, callback) {
+    cnx.query('INSERT INTO user (email, name, password, last_seen_date, creation_date, edition_date) VALUES (?, ?, MD5(?), NOW(), NOW(), NOW());',
+            [user.email, user.name, user.password],
+        function(error, result) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback(null, result.insertId);
+            }
+        });
+};
+exports.saveUser = saveUser;
 
 var saveNote = function (cnx, note, callback) {
-    console.log('saving note [%s]', note.id);
+    _server.logger.info('saving note ' + note.id);
     if (!note.id) {
-        console.log('insert');
+        _server.logger.info('insert');
         cnx.query('INSERT INTO note (board_id, text, x, y, color, creation_date, edition_date) VALUES (?, ?, ?, ?, ?, NOW(), NOW());',
                 [note.boardId, note.text, note.x, note.y, note.color],
             function(error, result) {
-                console.dir(result);
+                _server.logger.info(JSON.stringify(result));
                 if (error) {
                     callback({text: 'sql error', inner: error});
                 } else {
@@ -72,11 +102,11 @@ var saveNote = function (cnx, note, callback) {
                 }
             });
     } else {
-        console.log('update');
+        _server.logger.info('update');
         cnx.query('UPDATE note SET text = ?, x = ?, y = ?, color = ?, edition_date = NOW() WHERE id = ?;',
                 [note.text, note.x, note.y, note.color, note.id],
             function(error, result) {
-                console.dir(result);
+                _server.logger.info(JSON.stringify(result));
                 if (error) {
                     callback({text: 'sql error', inner: error});
                 } else {
@@ -85,9 +115,4 @@ var saveNote = function (cnx, note, callback) {
             });
     }
 };
-
-exports.getMySqlConnection = getMySqlConnection;
-exports.getUserById = getUserById;
-exports.getUserByNameAndPassword = getUserByNameAndPassword;
-exports.listBoardsByUserId = listBoardsByUserId;
 exports.saveNote = saveNote;
