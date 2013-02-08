@@ -84,7 +84,7 @@ var handleRequest = function (context) {
         {pattern: /^\/boards\/poll$/g, method: 'GET', restricted: true, handler: onBoardsPoll},
         {pattern: /^\/notes$/g, method: 'POST', restricted: true, handler: onPostNotes},
         {pattern: /^\/notes$/g, method: 'GET', restricted: true, handler: onGetNotes},
-        {pattern: /^\/logs$/g, method: 'GET', restricted: true, handler: onGetLogs}
+        {pattern: /^\/logs$/g, method: 'GET', handler: onGetLogs}
     ];
 
     for (var i = 0, imax = routes.length; i < imax; i++) {
