@@ -92,7 +92,7 @@ var saveNote = function (cnx, note, callback) {
     if (!note.id) {
         _server.logger.info('insert');
         cnx.query('INSERT INTO note (board_id, text, x, y, color, creation_date, edition_date) VALUES (?, ?, ?, ?, ?, NOW(), NOW());',
-                [note.boardId, note.text, note.x, note.y, note.color],
+            [note.boardId, note.text, note.x, note.y, note.color],
             function(error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
@@ -104,7 +104,7 @@ var saveNote = function (cnx, note, callback) {
     } else {
         _server.logger.info('update');
         cnx.query('UPDATE note SET text = ?, x = ?, y = ?, color = ?, edition_date = NOW() WHERE id = ?;',
-                [note.text, note.x, note.y, note.color, note.id],
+            [note.text, note.x, note.y, note.color, note.id],
             function(error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
@@ -116,6 +116,59 @@ var saveNote = function (cnx, note, callback) {
     }
 };
 exports.saveNote = saveNote;
+
+var addBoard = function (cnx, board, callback) {
+    cnx.query(
+        'INSERT INTO board (name, creation_date, edition_date) ' +
+        'VALUES (?, NOW(), NOW());',
+        [board.name],
+        function(error, result) {
+            _server.logger.info(JSON.stringify(result));
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback(null, result.insertId);
+            }
+        });
+};
+exports.addBoard = addBoard;
+
+var linkBoardAndUser = function (cnx, userId, boardId, callback) {
+    cnx.query(
+        'INSERT INTO board_user (board_id, user_id, creation_date) ' +
+        'VALUES (?, ?, NOW());',
+        [boardId, userId],
+        function(error, result) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback();
+            }
+        });
+};
+exports.linkBoardAndUser = linkBoardAndUser;
+
+var editBoard = function (cnx, userId, board, callback) {
+    cnx.query(
+            'UPDATE board AS b ' +
+            'JOIN board_user AS bu ' +
+            '  ON bu.board_id = b.id ' +
+            '    AND bu.user_id = ? ' +
+            'SET ' +
+            '  b.name = ?, ' +
+            '  edition_date = NOW() ' +
+            'WHERE id = ?;',
+            [userId, board.name, board.id],
+        function(error, result) {
+            _server.logger.info(JSON.stringify(result));
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback();
+            }
+        });
+};
+exports.editBoard = editBoard;
 
 var listNotesByBoardId = function (cnx, boardId, callback) {
     cnx.query('SELECT id, board_id AS boardId, text, x, y, color FROM note WHERE board_id = ?;',

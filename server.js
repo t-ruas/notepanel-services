@@ -50,9 +50,10 @@ var listener = function (request, response) {
     request.addListener('end', function () {
 
         response.setHeader('content-type', 'application/json');
-        response.setHeader('access-control-allow-origin', '*');
+        response.setHeader('access-control-allow-origin', request.headers.origin);
         response.setHeader('access-control-allow-methods', 'GET, PUT, POST, DELETE');
         response.setHeader('access-control-allow-headers', 'content-type, accept');
+        response.setHeader('access-control-allow-credentials', true);
         response.setHeader('access-control-max-age', 10);
 
         if (context.body.length > 0) {
@@ -76,33 +77,45 @@ var handleRequest = function (context) {
     var routes = [
         {pattern: /^\/users\/login$/g, method: 'GET', handler: onUsersLogin},
         {pattern: /^\/users\/logout$/g, method: 'GET', handler: onUsersLogout},
-        {pattern: /^\/users\/identify$/g, method: 'GET', handler: onUsersIdentify},
-        {pattern: /^\/users$/g, method: 'POST', handler: onUsers},
-        {pattern: /^\/boards\/poll$/g, method: 'GET', handler: onBoardsPoll},
-        {pattern: /^\/notes$/g, method: 'POST', handler: onPostNotes},
-        {pattern: /^\/notes$/g, method: 'GET', handler: onGetNotes},
+        {pattern: /^\/users\/identify$/g, method: 'GET', restricted: true, handler: onUsersIdentify},
+        {pattern: /^\/users$/g, method: 'POST', restricted: true, handler: onUsers},
+        {pattern: /^\/boards$/g, method: 'GET', restricted: true, handler: onGetBoards},
+        {pattern: /^\/boards$/g, method: 'POST', restricted: true, handler: onPostBoards},
+        {pattern: /^\/boards\/poll$/g, method: 'GET', restricted: true, handler: onBoardsPoll},
+        {pattern: /^\/notes$/g, method: 'POST', restricted: true, handler: onPostNotes},
+        {pattern: /^\/notes$/g, method: 'GET', restricted: true, handler: onGetNotes},
         {pattern: /^\/logs$/g, method: 'GET', handler: onGetLogs}
     ];
 
     for (var i = 0, imax = routes.length; i < imax; i++) {
         if (routes[i].method === context.request.method && context.path.pathname.match(routes[i].pattern)) {
-            routes[i].handler(context, function (error, result) {
-                if (error) {
-                    logger.error(error);
-                    context.response.statusCode = 500;
-                    context.response.end(JSON.stringify(error));
-                } else {
-                    context.response.statusCode = result.code;
-                    context.response.end(JSON.stringify(result.message));
+            var authorized = true;
+            if (routes[i].restricted) {
+                context.userId = getCurrentUserId(context.cookies);
+                if (!context.userId) {
+                    context.response.statusCode = 403;
+                    context.response.end();
+                    authorized = false;
                 }
-            });
+            }
+            if (authorized) {
+                routes[i].handler(context, function (error, result) {
+                    if (error) {
+                        logger.error(error);
+                        context.response.statusCode = 500;
+                        context.response.end(JSON.stringify(error));
+                    } else {
+                        context.response.statusCode = result.code;
+                        context.response.end(JSON.stringify(result.message));
+                    }
+                });
+            }
             handled = true;
             break;
         }
     }
 
     if (!handled) {
-        logger.warn('not found : ' + context.request.url);
         context.response.statusCode = 404;
         context.response.end();
     }
@@ -117,21 +130,13 @@ var onUsersLogin = function (context, callback) {
                 cnx.end();
                 callback(error);
             } else {
-                var message = {};
                 if (result) {
-                    setCurrentUserId(context.cookies, result['id']);
-                    message.user = result;
-                    _data.listBoardsByUserId(cnx, message.user.id,
+                    var user = result;
+                    setCurrentUserId(context.cookies, user.id);
+                    _data.updateUserLoginDate(cnx, user.id,
                         function(error, result) {
-                            if (error) {
-                                callback(error);
-                            } else {
-                                message.boards = result;
-                                callback(null, {code: 200, message: message});
-                            }
+                            callback(null, {code: 200, message: user});
                         });
-                    _data.updateUserLoginDate(cnx, message.user.id,
-                        function(error, result) {});
                     cnx.end();
                 } else {
                     cnx.end();
@@ -157,64 +162,99 @@ var onUsers = function (context, callback) {
 };
 
 var onUsersLogout = function (context, callback) {
-    var userId = getCurrentUserId(context.cookies);
-    if (userId) {
+    if (context.userId) {
         setCurrentUserId(context.cookies);
     }
     callback(null, {code: 200});
 };
 
 var onUsersIdentify = function (context, callback) {
-    var userId = getCurrentUserId(context.cookies);
-    if (userId) {
-        var cnx = _data.getMySqlConnection();
-        cnx.connect();
-        _data.getUserById(cnx, userId,
-            function(error, result) {
-                if (error) {
-                    cnx.end();
-                    callback(error);
-                } else {
-                    if (result) {
-                        var message = {user: result};
-                        _data.listBoardsByUserId(cnx, message.user.id,
-                            function(error, result) {
-                                if (error) {
-                                    callback(error);
-                                } else {
-                                    message.boards = result;
-                                    callback(null, {code: 200, message: message});
-                                }
-                            });
-                        cnx.end();
-                    } else {
-                        cnx.end();
-                        callback(null, {code: 403});
-                    }
-                }
-            });
-    } else {
-        callback(null, {code: 403});
-    }
-};
-
-var onGetNotes = function (context, callback) {
-    var boardId = context.path.query.boardId;
-    // get the cache version now rather than on callback
-    // better to have to replay some updates than miss the ones occuring between the select and the callback
-    var version = boardVersioning.getCache(boardId).version;
     var cnx = _data.getMySqlConnection();
     cnx.connect();
-    _data.listNotesByBoardId(cnx, boardId,
+    _data.getUserById(cnx, context.userId,
+        function(error, result) {
+            if (error) {
+                cnx.end();
+                callback(error);
+            } else {
+                if (result) {
+                    callback(null, {code: 200, message: result});
+                } else {
+                    callback(null, {code: 403});
+                }
+            }
+        });
+    cnx.end();
+};
+
+var onGetBoards = function (context, callback) {
+    var cnx = _data.getMySqlConnection();
+    _data.listBoardsByUserId(cnx, context.userId,
         function(error, result) {
             if (error) {
                 callback(error);
             } else {
-                callback(null, {code: 200, message: {notes: result, version: version}});
+                callback(null, {code: 200, message: result});
             }
         });
-        
     cnx.end();
+};
+
+var onPostBoards = function (context, callback) {
+    var board = context.content;
+    var cnx = _data.getMySqlConnection();
+    cnx.connect();
+    if (board.id) {
+        _data.editBoard(cnx, board,
+            function(error, result) {
+                if (error) {
+                    callback(error);
+                } else {
+                    callback(null, {code: 200});
+                }
+            });
+        cnx.end();
+    } else {
+        _data.addBoard(cnx, board,
+            function(error, result) {
+                if (error) {
+                    callback(error);
+                } else {
+                    var boardId = result;
+                    _data.linkBoardAndUser(cnx, context.userId, boardId,
+                        function(error, result) {
+                            if (error) {
+                                callback(error);
+                            } else {
+                                callback(null, {code: 200, message: {id: boardId}});
+                            }
+                        });
+                }
+                cnx.end();
+            });
+    }
+};
+
+var onGetNotes = function (context, callback) {
+    var boardId = parseInt(context.path.query.boardId);
+    if (isNaN(boardId)) {
+        callback(null, {code: 400});
+    } else {
+        // get the cache version now rather than on callback
+        // better to have to replay some updates than miss the ones occuring between the select and the callback
+        var version = boardVersioning.getCache(boardId).version;
+        var cnx = _data.getMySqlConnection();
+        cnx.connect();
+        _data.listNotesByBoardId(cnx, boardId,
+            function(error, result) {
+                if (error) {
+                    callback(error);
+                } else {
+                    callback(null, {code: 200, message: {notes: result, version: version}});
+                }
+            });
+        cnx.end();
+    }
 };
 
 var onPostNotes = function (context, callback) {
@@ -231,7 +271,6 @@ var onPostNotes = function (context, callback) {
                 callback(null, {code: 200, message: {id: note.id}});
             }
         });
-        
     cnx.end();
 };
 
@@ -257,6 +296,7 @@ var onBoardsPoll = function (context, callback) {
             callback: callback
         };
         boardVersioning.getCache(boardId).clients.push(client);
+        // TODO
         /*context.request.addListener('close', function ()
         {
         });*/
