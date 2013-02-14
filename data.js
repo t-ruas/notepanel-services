@@ -77,7 +77,7 @@ exports.listBoardsByUserId = listBoardsByUserId;
 var saveUser = function (cnx, user, callback) {
     cnx.query('INSERT INTO user (email, name, password, last_seen_date, creation_date, edition_date) VALUES (?, ?, MD5(?), NOW(), NOW(), NOW());',
             [user.email, user.name, user.password],
-        function(error, result) {
+        function (error, result) {
             if (error) {
                 callback({text: 'sql error', inner: error});
             } else {
@@ -87,13 +87,26 @@ var saveUser = function (cnx, user, callback) {
 };
 exports.saveUser = saveUser;
 
+var deleteNote = function (cnx, note, callback) {
+    cnx.query('DELETE FROM note WHERE board_id = ? AND id = ?;',
+            [note.boardId, note.id],
+        function (error, result) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback();
+            }
+        });
+};
+exports.deleteNote = deleteNote;
+
 var saveNote = function (cnx, note, callback) {
     _server.logger.info('saving note ' + note.id);
     if (!note.id) {
         _server.logger.info('insert');
         cnx.query('INSERT INTO note (board_id, text, x, y, color, creation_date, edition_date) VALUES (?, ?, ?, ?, ?, NOW(), NOW());',
             [note.boardId, note.text, note.x, note.y, note.color],
-            function(error, result) {
+            function (error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
                     callback({text: 'sql error', inner: error});

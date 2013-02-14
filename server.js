@@ -75,6 +75,7 @@ var handleRequest = function (context) {
     var handled = false;
 
     var routes = [
+        {pattern: /^\/.*$/g, method: 'OPTIONS', handler: onOptions},
         {pattern: /^\/users\/login$/g, method: 'GET', handler: onUsersLogin},
         {pattern: /^\/users\/logout$/g, method: 'GET', handler: onUsersLogout},
         {pattern: /^\/users\/identify$/g, method: 'GET', restricted: true, handler: onUsersIdentify},
@@ -84,6 +85,7 @@ var handleRequest = function (context) {
         {pattern: /^\/boards\/poll$/g, method: 'GET', restricted: true, handler: onBoardsPoll},
         {pattern: /^\/notes$/g, method: 'POST', restricted: true, handler: onPostNotes},
         {pattern: /^\/notes$/g, method: 'GET', restricted: true, handler: onGetNotes},
+        {pattern: /^\/notes$/g, method: 'DELETE', restricted: true, handler: onDeleteNotes},
         {pattern: /^\/logs$/g, method: 'GET', handler: onGetLogs}
     ];
 
@@ -119,6 +121,10 @@ var handleRequest = function (context) {
         context.response.statusCode = 404;
         context.response.end();
     }
+};
+
+var onOptions = function (context, callback) {
+    callback(null, {code: 200});
 };
 
 var onUsersLogin = function (context, callback) {
@@ -269,6 +275,25 @@ var onPostNotes = function (context, callback) {
                 note.id = result;
                 boardVersioning.update(note);
                 callback(null, {code: 200, message: {id: note.id}});
+            }
+        });
+    cnx.end();
+};
+
+var onDeleteNotes = function (context, callback) {
+    var noteId = parseInt(context.path.query.noteId);
+    var boardId = parseInt(context.path.query.boardId);
+    var note = {boardId: boardId, id: noteId};
+    var cnx = _data.getMySqlConnection();
+    cnx.connect();
+    _data.deleteNote(cnx, note,
+        function(error, result) {
+            if (error) {
+                callback(error);
+            } else {
+                note.deleted = true;
+                boardVersioning.update(note);
+                callback(null, {code: 200});
             }
         });
     cnx.end();
