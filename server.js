@@ -83,6 +83,7 @@ var handleRequest = function (context) {
         {pattern: /^\/boards$/g, method: 'GET', restricted: true, handler: onGetBoards},
         {pattern: /^\/boards$/g, method: 'POST', restricted: true, handler: onPostBoards},
         {pattern: /^\/boards\/poll$/g, method: 'GET', restricted: true, handler: onBoardsPoll},
+        {pattern: /^\/boards\/users$/g, method: 'GET', restricted: true, handler: onGetBoardsUsers},
         {pattern: /^\/notes$/g, method: 'POST', restricted: true, handler: onPostNotes},
         {pattern: /^\/notes$/g, method: 'GET', restricted: true, handler: onGetNotes},
         {pattern: /^\/notes$/g, method: 'DELETE', restricted: true, handler: onDeleteNotes},
@@ -196,6 +197,20 @@ var onUsersIdentify = function (context, callback) {
 var onGetBoards = function (context, callback) {
     var cnx = _data.getMySqlConnection();
     _data.listBoardsByUserId(cnx, context.userId,
+        function(error, result) {
+            if (error) {
+                callback(error);
+            } else {
+                callback(null, {code: 200, message: result});
+            }
+        });
+    cnx.end();
+};
+
+var onGetBoardsUsers = function (context, callback) {
+    var boardId = parseInt(context.path.query.boardId);
+    var cnx = _data.getMySqlConnection();
+    _data.listBoardsUsersByBoardId(cnx, boardId,
         function(error, result) {
             if (error) {
                 callback(error);
