@@ -74,6 +74,19 @@ var listBoardsByUserId = function (cnx, userId, callback) {
 };
 exports.listBoardsByUserId = listBoardsByUserId;
 
+var listBoardsUsersByBoardId = function (cnx, boardId, callback) {
+    cnx.query('SELECT u.id, u.name FROM user AS u JOIN board_user AS bu ON bu.board_id = ? AND bu.user_id = u.id;',
+            [boardId],
+        function(error, rows, fields) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback(null, rows);
+            }
+        });
+};
+exports.listBoardsUsersByBoardId = listBoardsUsersByBoardId;
+
 var saveUser = function (cnx, user, callback) {
     cnx.query('INSERT INTO user (email, name, password, last_seen_date, creation_date, edition_date) VALUES (?, ?, MD5(?), NOW(), NOW(), NOW());',
             [user.email, user.name, user.password],
