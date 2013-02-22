@@ -2,6 +2,7 @@ var _url = require('url');
 var _http = require('http');
 var _cookies = require('cookies');
 var _keygrip = require('keygrip');
+var _enums = require('./enums.js');
 var _data = require('./data.js');
 var _winston = require('winston');
 var _moment = require('moment');
@@ -65,13 +66,18 @@ var listener = function (request, response) {
 };
 
 var handleRequest = function (context) {
-/*
+
+    // comment for Azure    
     process.addListener('uncaughtException', function (error) {
         logger.error('uncaught exception: ' + error);
+        // TODO : log stacktrace
+        if(error.text) {
+            logger.error(error.text);
+        }
         context.response.statusCode = 500;
         context.response.end(JSON.stringify({text: error}));
     });
-*/
+
     var handled = false;
 
     var routes = [
@@ -104,7 +110,6 @@ var handleRequest = function (context) {
             if (authorized) {
                 routes[i].handler(context, function (error, result) {
                     if (error) {
-                        logger.error(error);
                         context.response.statusCode = 500;
                         context.response.end(JSON.stringify(error));
                     } else {
@@ -263,20 +268,106 @@ var onGetNotes = function (context, callback) {
     } else {
         // get the cache version now rather than on callback
         // better to have to replay some updates than miss the ones occuring between the select and the callback
+        logger.info('before oardVersioning.getCache(boardId).version');
         var version = boardVersioning.getCache(boardId).version;
+        var userId = getCurrentUserId(context.cookies);
         var cnx = _data.getMySqlConnection();
         cnx.connect();
-        _data.listNotesByBoardId(cnx, boardId,
-            function(error, result) {
+        _data.getBoardWithUsersWithNotes(cnx, boardId,
+            function(error, board) {
                 if (error) {
                     callback(error);
                 } else {
-                    callback(null, {code: 200, message: {notes: result, version: version}});
+                    var notes = [];
+                    for(var iNote in board.notes) {
+                        var note = board.notes[iNote];
+                        note.options = calculateBoardNoteOptions(board, userId, board.notes[iNote]); // set actual options of the note for the current user
+                        notes.push(note);
+                    }
+                    board.notes = null; // to alleviate the cache
+                    boardCache[board.id] = board;
+                    callback(null, {code: 200, message: {notes: notes, version: version}});
                 }
+                cnx.end();
             });
-        cnx.end();
     }
 };
+
+var getUserInBoard = function(board, userId) {
+    for(var iUser in board.users) {
+        if(board.users[iUser].id == userId)
+            return board.users[iUser];
+    }
+    return null;
+}
+
+var calculateBoardNoteOptions = function(board, userId, note) {
+    var options = 0;    
+    var user = getUserInBoard(board, userId);
+    switch (board.privacy) {
+        case _enums.boardPrivacies.PUBLIC:
+            if(user) { // user is a user of this board
+                options = calculateNoteOption(user, note);
+            } else { // user is not a user of this board (logged or not)
+                options = _enums.noteOptions.NONE;
+            }
+            break;
+        case _enums.boardPrivacies.INTERNAL_READONLY:
+            if(user) { // user is a user of this board
+                options = calculateNoteOption(user, note);
+            } else { // user is not a user of this board (only logged)
+                options = _enums.noteOptions.NONE;
+            }
+            break;
+        case _enums.boardPrivacies.INTERNAL_ALTERABLE:
+            if(user) { // user is a user of this board
+                options = calculateNoteOption(user, note);
+            } else { // user is not a user of this board (only logged)
+                // note keep its default options
+                //note.options = note.options;
+            }
+            break;
+        case _enums.boardPrivacies.PRIVATE:
+            if(user) { // user is a user of this board
+                options = calculateNoteOption(user, note);
+            } else { // user is not a user of this board (only logged)
+                // note keep its default options
+                //note.options = note.options;
+            }
+            break;
+        default:
+            // TODO : throw exception ?
+            options = _enums.noteOptions.NONE;
+            break;
+    }
+    return options;
+}
+
+var calculateNoteOption = function(user, note) {
+    var options = 0;
+    switch (user.user_group) {
+        case _enums.userGroups.OWNER:
+            options = notes.owner_options;
+            break;
+        case _enums.userGroups.ADMIN:
+            options = notes.admin_options;
+            break;
+        case _enums.userGroups.CONTRIBUTOR:
+            options = notes.contributor_options;
+            break;
+        case _enums.userGroups.VIEWER:
+            options = _enums.noteOptions.NONE;
+            break;
+        default:
+            // TODO : throw exception ?
+            options = _enums.noteOptions.NONE;
+            break;
+    }
+    if(note.lock <= user.user_group) {// note is locked by a user with a higher or same profile (from 1 to 4, with 1 the highest) than the current user
+        options = _enums.noteOptions.NONE;
+    }
+    return options;
+}
 
 var onPostNotes = function (context, callback) {
     var note = context.content;
@@ -340,6 +431,22 @@ var onBoardsPoll = function (context, callback) {
         /*context.request.addListener('close', function ()
         {
         });*/
+    }
+};
+
+var boardCache = {    
+    cache: {},
+    
+    get: function (boardId) {
+        if (!(boardId in boardCache.cache)) {
+            // TODO
+            logger.error("Missing cache for board " + boardId);
+        }
+        return boardCache.cache[boardId];
+    },
+    
+    set: function (board) {
+        boardCache.cache[board.id] = board;
     }
 };
 

@@ -36,7 +36,7 @@ var getUserById = function (cnx, id, callback) {
 exports.getUserById = getUserById;
 
 var getUserByNameAndPassword = function (cnx, name, password, callback) {
-    cnx.query('SELECT id, email, name FROM user WHERE name = ? AND password = MD5(?);',
+    cnx.query('SELECT id, email, name FROM user WHERE name = ? AND password = MD5(?);', 
             [name, password],
         function(error, rows, fields) {
             if (error) {
@@ -75,7 +75,7 @@ var listBoardsByUserId = function (cnx, userId, callback) {
 exports.listBoardsByUserId = listBoardsByUserId;
 
 var listBoardsUsersByBoardId = function (cnx, boardId, callback) {
-    cnx.query('SELECT u.id, u.name FROM user AS u JOIN board_user AS bu ON bu.board_id = ? AND bu.user_id = u.id;',
+    cnx.query('SELECT u.id, u.name, bu.user_group as userGroup FROM user AS u JOIN board_user AS bu ON bu.board_id = ? AND bu.user_id = u.id;',
             [boardId],
         function(error, rows, fields) {
             if (error) {
@@ -86,6 +86,49 @@ var listBoardsUsersByBoardId = function (cnx, boardId, callback) {
         });
 };
 exports.listBoardsUsersByBoardId = listBoardsUsersByBoardId;
+
+var getBoard = function (cnx, boardId, callback) {
+    cnx.query('SELECT b.id, b.name, b.width, b.height, b.color, b.privacy, b.options FROM board AS b WHERE b.id = ?',
+            [boardId],
+        function(error, rows, fields) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback(null, rows);
+            }
+        });
+};
+exports.getBoard = getBoard;
+
+var getBoardWithUsersWithNotes = function (cnx, boardId, callback) {
+    var board = null;
+    // retrieve board data
+    getBoard(cnx, boardId, function (error, result) {
+        if(error) {
+            callback({text: 'Error retrieving board data', inner: error});
+        } else {
+            board = result[0];
+            // retrieve board users data
+            listBoardsUsersByBoardId(cnx, boardId, function(error, result) {
+                if(error) {
+                    callback({text: 'Error retrieving board users data', inner: error});
+                } else {
+                    board.users = result;
+                    // retrieve board notes data
+                    listNotesByBoardId(cnx, boardId, function(error, result) {
+                        if(error) {
+                            callback({text: 'Error retrieving board notes data', inner: error});
+                        } else {
+                            board.notes = result;
+                            callback(null, board);
+                        }
+                    });
+                }
+            });
+        }
+    });
+}
+exports.getBoardWithUsersWithNotes = getBoardWithUsersWithNotes;
 
 var saveUser = function (cnx, user, callback) {
     cnx.query('INSERT INTO user (email, name, password, last_seen_date, creation_date, edition_date) VALUES (?, ?, MD5(?), NOW(), NOW(), NOW());',
@@ -116,9 +159,12 @@ exports.deleteNote = deleteNote;
 var saveNote = function (cnx, note, callback) {
     _server.logger.info('saving note ' + note.id);
     if (!note.id) {
-        _server.logger.info('insert');
-        cnx.query('INSERT INTO note (board_id, text, x, y, color, creation_date, edition_date) VALUES (?, ?, ?, ?, ?, NOW(), NOW());',
-            [note.boardId, note.text, note.x, note.y, note.color],
+        // TODO : remove this hack and find a good solution
+        if(note.userId) {
+        _server.logger.info('insert note');
+        cnx.query('INSERT INTO note (board_id, user_id, text, width, height, x, y, z, color, template, creation_date, edition_date) ' +
+                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
+            [note.boardId, note.userId, note.text, note.width, note.height, note.x, note.y, note.z, note.color, note.template],
             function (error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
@@ -127,10 +173,12 @@ var saveNote = function (cnx, note, callback) {
                     callback(null, result.insertId);
                 }
             });
+        }
     } else {
-        _server.logger.info('update');
-        cnx.query('UPDATE note SET text = ?, x = ?, y = ?, color = ?, edition_date = NOW() WHERE id = ?;',
-            [note.text, note.x, note.y, note.color, note.id],
+        _server.logger.info('update note');
+        cnx.query('UPDATE note SET text = ?, x = ?, y = ?, z = ?, color = ?, edition_date = NOW() WHERE id = ?;',
+            // TODO : add width and height if resizable, note.lock, note.options, etc...
+            [note.text, note.x, note.y, note.z, note.color, note.id],
             function(error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
@@ -197,7 +245,7 @@ var editBoard = function (cnx, userId, board, callback) {
 exports.editBoard = editBoard;
 
 var listNotesByBoardId = function (cnx, boardId, callback) {
-    cnx.query('SELECT id, board_id AS boardId, text, x, y, color FROM note WHERE board_id = ?;',
+    cnx.query('SELECT id, board_id AS boardId, user_id as userId, text, width, height, x, y, z, color, template, options, owner_options as ownerOptions, admin_options as adminOptions, contributor_options as contributorOptions FROM note WHERE board_id = ?;',
             [boardId],
         function(error, rows, fields) {
             if (error) {
@@ -207,5 +255,4 @@ var listNotesByBoardId = function (cnx, boardId, callback) {
             }
         });
 };
-
 exports.listNotesByBoardId = listNotesByBoardId;
