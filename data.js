@@ -162,9 +162,9 @@ var saveNote = function (cnx, note, callback) {
         // TODO : remove this hack and find a good solution
         if(note.userId) {
         _server.logger.info('insert note');
-        cnx.query('INSERT INTO note (board_id, user_id, text, width, height, x, y, z, color, template, creation_date, edition_date) ' +
-                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
-            [note.boardId, note.userId, note.text, note.width, note.height, note.x, note.y, note.z, note.color, note.template],
+        cnx.query('INSERT INTO note (board_id, user_id, text, width, height, x, y, z, color, template, default_options, owner_options, admin_options, contributor_options, creation_date, edition_date) ' +
+                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
+            [note.boardId, note.userId, note.text, note.width, note.height, note.x, note.y, note.z, note.color, note.template, note.defaultOptions, note.ownerOptions, note.adminOptions, note.contributorOptions],
             function (error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
@@ -245,7 +245,7 @@ var editBoard = function (cnx, userId, board, callback) {
 exports.editBoard = editBoard;
 
 var listNotesByBoardId = function (cnx, boardId, callback) {
-    cnx.query('SELECT id, board_id AS boardId, user_id as userId, text, width, height, x, y, z, color, template, options, owner_options as ownerOptions, admin_options as adminOptions, contributor_options as contributorOptions FROM note WHERE board_id = ?;',
+    cnx.query('SELECT id, board_id AS boardId, user_id as userId, text, width, height, x, y, z, color, template, default_options as defaultOptions, owner_options as ownerOptions, admin_options as adminOptions, contributor_options as contributorOptions FROM note WHERE board_id = ?;',
             [boardId],
         function(error, rows, fields) {
             if (error) {

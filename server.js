@@ -110,6 +110,11 @@ var handleRequest = function (context) {
             if (authorized) {
                 routes[i].handler(context, function (error, result) {
                     if (error) {
+                        logger.error(error);
+                        // TODO : log stacktrace
+                        if(error.text) {
+                            logger.error(error.text);
+                        }
                         context.response.statusCode = 500;
                         context.response.end(JSON.stringify(error));
                     } else {
@@ -268,7 +273,6 @@ var onGetNotes = function (context, callback) {
     } else {
         // get the cache version now rather than on callback
         // better to have to replay some updates than miss the ones occuring between the select and the callback
-        logger.info('before oardVersioning.getCache(boardId).version');
         var version = boardVersioning.getCache(boardId).version;
         var userId = getCurrentUserId(context.cookies);
         var cnx = _data.getMySqlConnection();
@@ -278,14 +282,27 @@ var onGetNotes = function (context, callback) {
                 if (error) {
                     callback(error);
                 } else {
+                    // add board to cache
+                    boardCache.add(board);
                     var notes = [];
                     for(var iNote in board.notes) {
                         var note = board.notes[iNote];
-                        note.options = calculateBoardNoteOptions(board, userId, board.notes[iNote]); // set actual options of the note for the current user
-                        notes.push(note);
+                        var lightNote = {
+                            id: note.id,
+                            boardId: note.boardId,
+                            userId: note.userId,
+                            text: note.text,
+                            width: note.width,
+                            height: note.height,
+                            x: note.x,
+                            y: note.y,
+                            z: note.z,
+                            color: note.color,
+                            template: note.template
+                        };
+                        lightNote.options = calculateBoardNoteOptions(board, userId, note); // set actual options of the note for the current user
+                        notes.push(lightNote);
                     }
-                    board.notes = null; // to alleviate the cache
-                    boardCache[board.id] = board;
                     callback(null, {code: 200, message: {notes: notes, version: version}});
                 }
                 cnx.end();
@@ -301,38 +318,39 @@ var getUserInBoard = function(board, userId) {
     return null;
 }
 
+// calculate note option for a user (logged or not) according to the board privacy
 var calculateBoardNoteOptions = function(board, userId, note) {
     var options = 0;    
     var user = getUserInBoard(board, userId);
     switch (board.privacy) {
         case _enums.boardPrivacies.PUBLIC:
             if(user) { // user is a user of this board
-                options = calculateNoteOption(user, note);
+                options = calculateNoteOptions(user, note);
             } else { // user is not a user of this board (logged or not)
                 options = _enums.noteOptions.NONE;
             }
             break;
         case _enums.boardPrivacies.INTERNAL_READONLY:
             if(user) { // user is a user of this board
-                options = calculateNoteOption(user, note);
+                options = calculateNoteOptions(user, note);
             } else { // user is not a user of this board (only logged)
                 options = _enums.noteOptions.NONE;
             }
             break;
         case _enums.boardPrivacies.INTERNAL_ALTERABLE:
             if(user) { // user is a user of this board
-                options = calculateNoteOption(user, note);
+                options = calculateNoteOptions(user, note);
             } else { // user is not a user of this board (only logged)
                 // note keep its default options
-                //note.options = note.options;
+                options = note.defaultOptions;
             }
             break;
         case _enums.boardPrivacies.PRIVATE:
             if(user) { // user is a user of this board
-                options = calculateNoteOption(user, note);
+                options = calculateNoteOptions(user, note);
             } else { // user is not a user of this board (only logged)
                 // note keep its default options
-                //note.options = note.options;
+                options = note.defaultOptions;
             }
             break;
         default:
@@ -343,17 +361,18 @@ var calculateBoardNoteOptions = function(board, userId, note) {
     return options;
 }
 
-var calculateNoteOption = function(user, note) {
+// calculate note option for a user
+var calculateNoteOptions = function(user, note) {
     var options = 0;
-    switch (user.user_group) {
+    switch (user.userGroup) {
         case _enums.userGroups.OWNER:
-            options = notes.owner_options;
+            options = note.ownerOptions;
             break;
         case _enums.userGroups.ADMIN:
-            options = notes.admin_options;
+            options = note.adminOptions;
             break;
         case _enums.userGroups.CONTRIBUTOR:
-            options = notes.contributor_options;
+            options = note.contributorOptions;
             break;
         case _enums.userGroups.VIEWER:
             options = _enums.noteOptions.NONE;
@@ -363,7 +382,7 @@ var calculateNoteOption = function(user, note) {
             options = _enums.noteOptions.NONE;
             break;
     }
-    if(note.lock <= user.user_group) {// note is locked by a user with a higher or same profile (from 1 to 4, with 1 the highest) than the current user
+    if(note.lock && note.lock <= user.userGroup) {// note is locked by a user with a higher or same profile (from 1 to 4, with 1 the highest) than the current user
         options = _enums.noteOptions.NONE;
     }
     return options;
@@ -379,6 +398,8 @@ var onPostNotes = function (context, callback) {
                 callback(error);
             } else {
                 note.id = result;
+                // caching note to have its options according profile
+                boardCache.addNote(note.boardId, note);
                 boardVersioning.update(note);
                 callback(null, {code: 200, message: {id: note.id}});
             }
@@ -398,6 +419,8 @@ var onDeleteNotes = function (context, callback) {
                 callback(error);
             } else {
                 note.deleted = true;
+                // removing note from the board cache
+                boardCache.removeNote(boardId, noteId);
                 boardVersioning.update(note);
                 callback(null, {code: 200});
             }
@@ -420,10 +443,13 @@ var onBoardsPoll = function (context, callback) {
     var boardId = context.path.query.boardId;
     var version = context.path.query.version;
     var updates = boardVersioning.getUpdates(boardId, version);
+    logger.info("onBoardsPoll updates.length : " + updates.length); 
     if (updates.length) {
         callback(null, {code: 200, message: updates});
     } else {
+        var userId = getCurrentUserId(context.cookies);
         var client = {
+            userId: userId,
             callback: callback
         };
         boardVersioning.getCache(boardId).clients.push(client);
@@ -445,8 +471,40 @@ var boardCache = {
         return boardCache.cache[boardId];
     },
     
-    set: function (board) {
+    add: function (board) {
+        logger.info("Caching board " + board.id);
         boardCache.cache[board.id] = board;
+    },
+    
+    getNote: function(boardId, noteId) {
+        board = boardCache.get(boardId);
+        for(var iNote in board.notes) {
+            if(board.notes[iNote].id == noteId)
+                return board.notes[iNote];
+        }
+        return null;
+    },
+    
+    addNote: function(boardId, note) {
+        logger.info("Adding note " + note.id + " to the cached board " + boardId);
+        var board = boardCache.get(note.boardId);
+        if(!board.notes) {
+            board.notes = [];
+        }
+        board.notes.push(note);
+    },
+    
+    removeNote: function(boardId, noteId) {
+        logger.info("Removing note " + noteId + " from the cached board " + boardId);
+        var board = boardCache.get(boardId);
+        var index = -1;
+        for(var iNote in board.notes) {
+            if(board.notes[iNote].id == noteId) {
+                index = iNote;
+                break;
+            }
+        }
+        board.notes.splice(index, 1);
     }
 };
 
@@ -466,7 +524,7 @@ var boardVersioning = {
     },
     
     update: function (note) {
-        var cache = boardVersioning.getCache(note.boardId)
+        var cache = boardVersioning.getCache(note.boardId);
         cache.version++;
         var update = {
             version: cache.version,
@@ -476,8 +534,16 @@ var boardVersioning = {
             cache.updates.shift();
         }
         cache.updates.push(update);
+        var cachedNote = boardCache.getNote(note.boardId, note.id);
+        var board = boardCache.get(note.boardId);
         var updates = [update];
         for (var i = 0, imax = cache.clients.length; i < imax; i++) {
+            // setting note options according to user (i.e. client) profile for the current board
+            if(cachedNote) { // cached note must contain the different options according to profile 
+                update.note.options = calculateBoardNoteOptions(board, cache.clients[i].userId, cachedNote);
+            } else {
+                logger.error('note ' + note.id + ' not found in the cache for board ' + board.id);
+            }
             cache.clients[i].callback(null, {code: 200, message: updates});
         }
         cache.clients.length = 0;
@@ -486,9 +552,20 @@ var boardVersioning = {
     getUpdates: function (boardId, version) {
         var list = [];
         var cache = boardVersioning.getCache(boardId);
+        var board = boardCache.get(boardId);
+        var userId = getCurrentUserId(context.cookies);
         if (cache.version > version) {
             for (var i = cache.updates.length - 1; i >= 0; i--) {
                 if (cache.updates[i].version > version) {
+                    // setting note options according to user (i.e. client) profile for the current board
+                    var note = cache.updates[i].note;
+                    var cachedNote = boardCache.getNote(boardId, note.id);
+                    if(cachedNote) { // cached note must contain the different options according to profile 
+                        note.options = calculateBoardNoteOptions(board, userId, cachedNote);
+                        logger.info("options for updated note " + note.id + " : " + note.options);
+                    } else {
+                        logger.error('note ' + note.id + ' not found in the cache for board ' + boardId);
+                    }
                     list.push(cache.updates[i])
                 } else {
                     break;
