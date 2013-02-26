@@ -291,13 +291,12 @@ var onGetNotes = function (context, callback) {
                             id: note.id,
                             boardId: note.boardId,
                             userId: note.userId,
-                            text: note.text,
+                            value: note.value,
                             width: note.width,
                             height: note.height,
                             x: note.x,
                             y: note.y,
                             z: note.z,
-                            color: note.color,
                             template: note.template
                         };
                         lightNote.options = calculateBoardNoteOptions(board, userId, note); // set actual options of the note for the current user
@@ -393,7 +392,7 @@ var onPostNotes = function (context, callback) {
     var cnx = _data.getMySqlConnection();
     cnx.connect();
     _data.saveNote(cnx, note,
-        function(error, result) {
+        function (error, result) {
             if (error) {
                 callback(error);
             } else {

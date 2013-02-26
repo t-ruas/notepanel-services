@@ -162,23 +162,31 @@ var saveNote = function (cnx, note, callback) {
         // TODO : remove this hack and find a good solution
         if(note.userId) {
         _server.logger.info('insert note');
-        cnx.query('INSERT INTO note (board_id, user_id, text, width, height, x, y, z, color, template, default_options, owner_options, admin_options, contributor_options, creation_date, edition_date) ' +
-                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
-            [note.boardId, note.userId, note.text, note.width, note.height, note.x, note.y, note.z, note.color, note.template, note.defaultOptions, note.ownerOptions, note.adminOptions, note.contributorOptions],
+        cnx.query('INSERT INTO note (board_id, user_id, value, width, height, x, y, z, template, default_options, owner_options, admin_options, contributor_options, creation_date, edition_date) ' +
+                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
+            [note.boardId, note.userId, JSON.stringify(note.value), note.width, note.height, note.x, note.y, note.z, note.template, note.defaultOptions, note.ownerOptions, note.adminOptions, note.contributorOptions],
             function (error, result) {
-                _server.logger.info(JSON.stringify(result));
                 if (error) {
                     callback({text: 'sql error', inner: error});
                 } else {
+                    _server.logger.info(JSON.stringify(result));
                     callback(null, result.insertId);
                 }
             });
         }
     } else {
         _server.logger.info('update note');
-        cnx.query('UPDATE note SET text = ?, x = ?, y = ?, z = ?, color = ?, edition_date = NOW() WHERE id = ?;',
+        var str, params;
+        if (note.value) {
+            str = 'UPDATE note SET value = ?, edition_date = NOW() WHERE id = ?;';
+            params = [JSON.stringify(note.value), note.id];
+        } else {
+            str = 'UPDATE note SET x = ?, y = ?, z = ?, edition_date = NOW() WHERE id = ?;';
+            params = [note.x, note.y, note.z, note.id];
+        }
+        cnx.query(str,
             // TODO : add width and height if resizable, note.lock, note.options, etc...
-            [note.text, note.x, note.y, note.z, note.color, note.id],
+            params,
             function(error, result) {
                 _server.logger.info(JSON.stringify(result));
                 if (error) {
@@ -245,12 +253,15 @@ var editBoard = function (cnx, userId, board, callback) {
 exports.editBoard = editBoard;
 
 var listNotesByBoardId = function (cnx, boardId, callback) {
-    cnx.query('SELECT id, board_id AS boardId, user_id as userId, text, width, height, x, y, z, color, template, default_options as defaultOptions, owner_options as ownerOptions, admin_options as adminOptions, contributor_options as contributorOptions FROM note WHERE board_id = ?;',
+    cnx.query('SELECT id, board_id AS boardId, user_id as userId, value, width, height, x, y, z, template, default_options as defaultOptions, owner_options as ownerOptions, admin_options as adminOptions, contributor_options as contributorOptions FROM note WHERE board_id = ?;',
             [boardId],
         function(error, rows, fields) {
             if (error) {
                 callback({text: 'sql error', inner: error});
             } else {
+                for (var i = 0, imax = rows.length; i < imax; i++) {
+                    rows[i].value = JSON.parse(rows[i].value);
+                }
                 callback(null, rows);
             }
         });
