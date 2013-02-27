@@ -465,14 +465,15 @@ var onBoardsPoll = function (context, callback) {
             userId: userId,
             callback: callback
         };
-        boardVersioning.getCache(boardId).clients.push(client);
-        // TODO
-        /*context.request.addListener('close', function ()
-        {
-        });*/
+        var cache = boardVersioning.getCache(boardId);
+        var n = cache.clients.push(client);
+        context.request.addListener('close', function () {
+            cache.clients.splice(n, 1);
+        });
     }
 };
 
+/*
 var boardCache = {    
     cache: {},
     
@@ -520,6 +521,7 @@ var boardCache = {
         board.notes.splice(index, 1);
     }
 };
+*/
 
 var boardVersioning = {
     queueSize: 10,
@@ -535,7 +537,7 @@ var boardVersioning = {
         }
         return boardVersioning.cache[boardId];
     },
-    
+
     update: function (note) {
         var cache = boardVersioning.getCache(note.boardId);
         cache.version++;
