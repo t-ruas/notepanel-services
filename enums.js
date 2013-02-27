@@ -1,3 +1,13 @@
+
+var noteUpdateType = {
+    ADD: 0,
+    POSITION: 1,
+    VALUE: 2,
+    RIGHTS: 3,
+    REMOVE: 4
+};
+exports.noteUpdateType = noteUpdateType;
+
 // User groups
 var userGroups = {
     OWNER : 1,

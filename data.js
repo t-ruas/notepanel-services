@@ -156,48 +156,51 @@ var deleteNote = function (cnx, note, callback) {
 };
 exports.deleteNote = deleteNote;
 
-var saveNote = function (cnx, note, callback) {
-    _server.logger.info('saving note ' + note.id);
-    if (!note.id) {
-        // TODO : remove this hack and find a good solution
-        if(note.userId) {
-        _server.logger.info('insert note');
-        cnx.query('INSERT INTO note (board_id, user_id, value, width, height, x, y, z, template, default_options, owner_options, admin_options, contributor_options, creation_date, edition_date) ' +
-                  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
-            [note.boardId, note.userId, JSON.stringify(note.value), note.width, note.height, note.x, note.y, note.z, note.template, note.defaultOptions, note.ownerOptions, note.adminOptions, note.contributorOptions],
-            function (error, result) {
-                if (error) {
-                    callback({text: 'sql error', inner: error});
-                } else {
-                    _server.logger.info(JSON.stringify(result));
-                    callback(null, result.insertId);
-                }
-            });
-        }
-    } else {
-        _server.logger.info('update note');
-        var str, params;
-        if (note.value) {
-            str = 'UPDATE note SET value = ?, edition_date = NOW() WHERE id = ?;';
-            params = [JSON.stringify(note.value), note.id];
-        } else {
-            str = 'UPDATE note SET x = ?, y = ?, z = ?, edition_date = NOW() WHERE id = ?;';
-            params = [note.x, note.y, note.z, note.id];
-        }
-        cnx.query(str,
-            // TODO : add width and height if resizable, note.lock, note.options, etc...
-            params,
-            function(error, result) {
-                _server.logger.info(JSON.stringify(result));
-                if (error) {
-                    callback({text: 'sql error', inner: error});
-                } else {
-                    callback(null, note.id);
-                }
-            });
-    }
+var addNote = function (cnx, note, callback) {
+    _server.logger.info('insert note');
+    cnx.query('INSERT INTO note (board_id, user_id, value, width, height, x, y, z, template, default_options, owner_options, admin_options, contributor_options, creation_date, edition_date) ' +
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW());',
+        [note.boardId, note.userId, JSON.stringify(note.value), note.width, note.height, note.x, note.y, note.z, note.template, note.defaultOptions, note.ownerOptions, note.adminOptions, note.contributorOptions],
+        function (error, result) {
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                note.id = result.insertId;
+                callback();
+            }
+        });
 };
-exports.saveNote = saveNote;
+exports.addNote = addNote;
+
+var updateNotePosition = function (cnx, note, callback) {
+    _server.logger.info('saving note ' + note.id);
+    cnx.query('UPDATE note SET x = ?, y = ?, z = ?, width = ?, height = ?, edition_date = NOW() WHERE id = ?;',
+        [note.x, note.y, note.z, note.width, note.height, note.id],
+        function(error, result) {
+            _server.logger.info(JSON.stringify(result));
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback();
+            }
+        });
+};
+exports.updateNotePosition = updateNotePosition;
+
+var updateNoteValue = function (cnx, note, callback) {
+    _server.logger.info('saving note ' + note.id);
+    cnx.query('UPDATE note SET value = ?, edition_date = NOW() WHERE id = ?;',
+        [JSON.stringify(note.value), note.id],
+        function(error, result) {
+            _server.logger.info(JSON.stringify(result));
+            if (error) {
+                callback({text: 'sql error', inner: error});
+            } else {
+                callback();
+            }
+        });
+};
+exports.updateNoteValue = updateNoteValue;
 
 var addBoard = function (cnx, board, callback) {
     cnx.query(
