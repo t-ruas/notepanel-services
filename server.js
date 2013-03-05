@@ -1,20 +1,18 @@
-var _url = require('url');
+﻿var _url = require('url');
 var _http = require('http');
 var _cookies = require('cookies');
-var _keygrip = require('keygrip');
 var _enums = require('./enums.js');
 var _data = require('./data.js');
 var _winston = require('winston');
 var _moment = require('moment');
-//var _events = require('events');
+var _crypto = require('crypto');
 
 var settings = {
     connectionString: process.env['MYSQLCONNSTR_notepanel'] || 'Data Source=localhost;User Id=root;Password=;Database=notepanel',
     port: process.env['PORT'] || 5001,
-    secrets: [
-        'jhgjfgjgfjgfjj',
-        'vfvcvwxcvwxcvwxcv'
-    ]
+    secret: process.env['secret'] || 'super123RFSDGTa$^rpùdf',
+    // Default cookie salt set by Flask.
+    salt: 'cookie-session'
 };
 exports.settings = settings;
 
@@ -26,12 +24,45 @@ var logger = new _winston.Logger({
 });
 exports.logger = logger;
 
-var setCurrentUserId = function (cookies, userId) {
-    cookies.set('notepanel_services_user', userId, {signed: true});
+var deriveKey = function () {
+    // Flask default hmac mode.
+    var hmac = _crypto.createHmac('sha1', new Buffer(settings.secret, 'utf8'));
+    hmac.update(settings.salt);
+    return hmac.digest();
 };
 
-var getCurrentUserId = function (cookies) {
-    return cookies.get('notepanel_services_user', {signed: true});
+var getSignature = function (value) {
+    var key = deriveKey();
+    var hmac = _crypto.createHmac('sha1', key);
+    hmac.update(value);
+    return hmac.digest('base64');
+};
+
+// Verify and decode session cookie as in python side itsdangerous.Signer.
+// eyJib2FyZF9pZCI6IjEiLCJ1c2VyX2lkIjoxfQ.BBdOnw.w_hHRZ63eKkB6KQlVPBRjTNfWD4
+var decryptCookie = function (str) {
+    logger.info('str ==> ' + str);
+    var u = str.lastIndexOf('.');
+    if (u >= 0) {
+        var value = str.substr(0, u);
+        logger.info('value ==> ' + value);
+        var sig = getSignature(value);
+        logger.info('sig ==> ' + sig);
+        while (sig.charAt(sig.length - 1) === '=') {
+            sig = sig.slice(0, -1);
+        }
+        // Python urlsafe_b64decode.
+        sig = sig.replace(/\+/g, '-').replace(/\//g, '_');
+        logger.info('sig ==> ' + sig);
+        if (sig === str.substr(u + 1)) {
+            var v = value.indexOf('.');
+            if (v >= 0) {
+                var content = new Buffer(value.substr(0, v), 'base64').toString('utf8');
+                return JSON.parse(content);
+            }
+        }
+    }
+    logger.info('failed to verify session cookie');
 };
 
 var listener = function (request, response) {
@@ -40,8 +71,9 @@ var listener = function (request, response) {
         request: request,
         response: response,
         path: _url.parse(request.url, true),
-        cookies: new _cookies(request, response, _keygrip(settings.secrets)),
-        body: ''
+        cookies: new _cookies(request, response),
+        body: '',
+        session: null
     };
 
     request.addListener('data', function (chunk) {
@@ -67,7 +99,10 @@ var listener = function (request, response) {
 
 var handleRequest = function (context) {
 
-    // comment for Azure    
+    logger.info('----> ' + context.request.method + ' ' + context.path.pathname);
+
+    // comment for Azure
+    /*
     process.addListener('uncaughtException', function (error) {
         logger.error('uncaught exception: ' + error);
         // TODO : log stacktrace
@@ -77,54 +112,66 @@ var handleRequest = function (context) {
         context.response.statusCode = 500;
         context.response.end(JSON.stringify({text: error}));
     });
-
+    */
+    
     var handled = false;
 
     var routes = [
         {pattern: /^\/.*$/g, method: 'OPTIONS', handler: onOptions},
-        {pattern: /^\/users\/login$/g, method: 'GET', handler: onUsersLogin},
-        {pattern: /^\/users\/logout$/g, method: 'GET', handler: onUsersLogout},
-        {pattern: /^\/users\/identify$/g, method: 'GET', restricted: true, handler: onUsersIdentify},
-        {pattern: /^\/users$/g, method: 'POST', restricted: true, handler: onUsers},
-        {pattern: /^\/boards$/g, method: 'GET', restricted: true, handler: onGetBoards},
-        {pattern: /^\/boards$/g, method: 'POST', restricted: true, handler: onPostBoards},
-        {pattern: /^\/boards\/poll$/g, method: 'GET', restricted: true, handler: onBoardsPoll},
-        {pattern: /^\/boards\/users$/g, method: 'GET', restricted: true, handler: onGetBoardsUsers},
-        {pattern: /^\/notes$/g, method: 'POST', restricted: true, handler: onPostNotes},
+        {pattern: /^\/notes\/poll\/([0-9]+)$/g, method: 'GET', restricted: true, handler: onGetNotesPoll},
         {pattern: /^\/notes$/g, method: 'GET', restricted: true, handler: onGetNotes},
-        {pattern: /^\/notes$/g, method: 'DELETE', restricted: true, handler: onDeleteNotes},
+        {pattern: /^\/notes$/g, method: 'PUT', restricted: true, handler: onPutNotes},
+        {pattern: /^\/notes\/([0-9]+)$/g, method: 'POST', restricted: true, handler: onPostNotes},
+        {pattern: /^\/notes\/([0-9]+)$/g, method: 'DELETE', restricted: true, handler: onDeleteNotes},
         {pattern: /^\/logs$/g, method: 'GET', handler: onGetLogs}
     ];
 
     for (var i = 0, imax = routes.length; i < imax; i++) {
-        if (routes[i].method === context.request.method && context.path.pathname.match(routes[i].pattern)) {
-            var authorized = true;
-            if (routes[i].restricted) {
-                context.userId = getCurrentUserId(context.cookies);
-                if (!context.userId) {
-                    context.response.statusCode = 403;
-                    context.response.end();
-                    authorized = false;
+        if (routes[i].method === context.request.method) {
+            var matches = routes[i].pattern.exec(context.path.pathname);
+            if (matches) {
+                //logger.info('cookies ==> ' + JSON.stringify(context.cookies.get('session')));
+                var session = context.cookies.get('session');
+                if (session) {
+                    context.session = decryptCookie(session);
                 }
-            }
-            if (authorized) {
-                routes[i].handler(context, function (error, result) {
-                    if (error) {
-                        logger.error(error);
-                        // TODO : log stacktrace
-                        if(error.text) {
-                            logger.error(error.text);
-                        }
-                        context.response.statusCode = 500;
-                        context.response.end(JSON.stringify(error));
-                    } else {
-                        context.response.statusCode = result.code;
-                        context.response.end(JSON.stringify(result.message));
+                logger.info('session cookie ==> ' + JSON.stringify(context.session));
+                var authorized = true;
+                if (routes[i].restricted) {
+                    if (!context.session) {
+                        context.response.statusCode = 403;
+                        context.response.end();
+                        authorized = false;
                     }
-                });
+                }
+                if (authorized) {
+                    // Convert values to integers when possible.
+                    for (var j = 1; j < matches.length; j++) {
+                        var u = parseInt(matches[j]);
+                        if (!isNaN(u)) {
+                            matches[j] = u;
+                        }
+                    }
+                    // Remove main regexp match from the array, leaving only the searched groups.
+                    matches.splice(0, 1, context, function (error, result) {
+                        if (error) {
+                            logger.error(error);
+                            // TODO : log stacktrace
+                            if(error.text) {
+                                logger.error(error.text);
+                            }
+                            context.response.statusCode = 500;
+                            context.response.end(JSON.stringify(error));
+                        } else {
+                            context.response.statusCode = result.code;
+                            context.response.end(JSON.stringify(result.message));
+                        }
+                    });
+                    routes[i].handler.apply(this, matches);
+                }
+                handled = true;
+                break;
             }
-            handled = true;
-            break;
         }
     }
 
@@ -138,262 +185,27 @@ var onOptions = function (context, callback) {
     callback(null, {code: 200});
 };
 
-var onUsersLogin = function (context, callback) {
-    var cnx = _data.getMySqlConnection();
-    cnx.connect();
-    _data.getUserByNameAndPassword(cnx, context.path.query.username, context.path.query.password,
-        function(error, result) {
-            if (error) {
-                cnx.end();
-                callback(error);
-            } else {
-                if (result) {
-                    var user = result;
-                    setCurrentUserId(context.cookies, user.id);
-                    _data.updateUserLoginDate(cnx, user.id,
-                        function(error, result) {
-                            callback(null, {code: 200, message: user});
-                        });
-                    cnx.end();
-                } else {
-                    cnx.end();
-                    callback(null, {code: 403});
-                }
-            }
-        });
-};
-
-var onUsers = function (context, callback) {
-    var cnx = _data.getMySqlConnection();
-    cnx.connect();
-    _data.saveUser(cnx, context.content,
-        function(error, result) {
-            if (error) {
-                callback(error);
-            } else {
-                setCurrentUserId(context.cookies, result);
-                callback(null, {code: 200, message: {id: result}});
-            }
-        });
-    cnx.end();
-};
-
-var onUsersLogout = function (context, callback) {
-    if (context.userId) {
-        setCurrentUserId(context.cookies);
-    }
-    callback(null, {code: 200});
-};
-
-var onUsersIdentify = function (context, callback) {
-    var cnx = _data.getMySqlConnection();
-    cnx.connect();
-    _data.getUserById(cnx, context.userId,
-        function(error, result) {
-            if (error) {
-                cnx.end();
-                callback(error);
-            } else {
-                if (result) {
-                    callback(null, {code: 200, message: result});
-                } else {
-                    callback(null, {code: 403});
-                }
-            }
-        });
-    cnx.end();
-};
-
-var onGetBoards = function (context, callback) {
-    var cnx = _data.getMySqlConnection();
-    _data.listBoardsByUserId(cnx, context.userId,
-        function(error, result) {
-            if (error) {
-                callback(error);
-            } else {
-                callback(null, {code: 200, message: result});
-            }
-        });
-    cnx.end();
-};
-
-var onGetBoardsUsers = function (context, callback) {
-    var boardId = parseInt(context.path.query.boardId);
-    var cnx = _data.getMySqlConnection();
-    _data.listBoardsUsersByBoardId(cnx, boardId,
-        function(error, result) {
-            if (error) {
-                callback(error);
-            } else {
-                callback(null, {code: 200, message: result});
-            }
-        });
-    cnx.end();
-};
-
-var onPostBoards = function (context, callback) {
-    var board = context.content;
-    var cnx = _data.getMySqlConnection();
-    cnx.connect();
-    if (board.id) {
-        _data.editBoard(cnx, board,
-            function(error, result) {
-                if (error) {
-                    callback(error);
-                } else {
-                    callback(null, {code: 200});
-                }
-            });
-        cnx.end();
-    } else {
-        _data.addBoard(cnx, board,
-            function(error, result) {
-                if (error) {
-                    callback(error);
-                } else {
-                    var boardId = result;
-                    _data.linkBoardAndUser(cnx, context.userId, boardId,
-                        function(error, result) {
-                            if (error) {
-                                callback(error);
-                            } else {
-                                callback(null, {code: 200, message: {id: boardId}});
-                            }
-                        });
-                }
-                cnx.end();
-            });
-    }
-};
-
 var onGetNotes = function (context, callback) {
-    var boardId = parseInt(context.path.query.boardId);
-    if (isNaN(boardId)) {
-        callback(null, {code: 400});
-    } else {
-        // get the cache version now rather than on callback
-        // better to have to replay some updates than miss the ones occuring between the select and the callback
-        var version = boardVersioning.getCache(boardId).version;
-        var userId = getCurrentUserId(context.cookies);
-        var cnx = _data.getMySqlConnection();
-        cnx.connect();
-        _data.getBoardWithUsersWithNotes(cnx, boardId,
-            function(error, board) {
-                if (error) {
-                    callback(error);
-                } else {
-                    // add board to cache
-                    /*
-                    boardCache.add(board);
-                    */
-                    var notes = [];
-                    for(var iNote in board.notes) {
-                        var note = board.notes[iNote];
-                        var lightNote = {
-                            id: note.id,
-                            boardId: note.boardId,
-                            userId: note.userId,
-                            value: note.value,
-                            width: note.width,
-                            height: note.height,
-                            x: note.x,
-                            y: note.y,
-                            z: note.z,
-                            template: note.template
-                        };
-                        lightNote.options = calculateBoardNoteOptions(board, userId, note); // set actual options of the note for the current user
-                        notes.push(lightNote);
-                    }
-                    callback(null, {code: 200, message: {notes: notes, version: version}});
-                }
-                cnx.end();
-            });
-    }
+    // get the cache version now rather than on callback
+    // better to have to replay some updates than miss the ones occuring between the select and the callback
+    var version = boardVersioning.getCache(context.session.board_id).version;
+    var cnx = _data.getMySqlConnection();
+    cnx.connect();
+    _data.listNotesByBoardId(cnx, context.session.board_id,
+        function(error, notes) {
+            if (error) {
+                callback(error);
+            } else {
+                callback(null, {code: 200, message: {notes: notes, version: version}});
+            }
+            cnx.end();
+        });
 };
 
-var getUserInBoard = function(board, userId) {
-    for(var iUser in board.users) {
-        if(board.users[iUser].id == userId)
-            return board.users[iUser];
-    }
-    return null;
-}
-
-// calculate note option for a user (logged or not) according to the board privacy
-var calculateBoardNoteOptions = function(board, userId, note) {
-    var options = 0;    
-    var user = getUserInBoard(board, userId);
-    switch (board.privacy) {
-        case _enums.boardPrivacies.PUBLIC:
-            if(user) { // user is a user of this board
-                options = calculateNoteOptions(user, note);
-            } else { // user is not a user of this board (logged or not)
-                options = _enums.noteOptions.NONE;
-            }
-            break;
-        case _enums.boardPrivacies.INTERNAL_READONLY:
-            if(user) { // user is a user of this board
-                options = calculateNoteOptions(user, note);
-            } else { // user is not a user of this board (only logged)
-                options = _enums.noteOptions.NONE;
-            }
-            break;
-        case _enums.boardPrivacies.INTERNAL_ALTERABLE:
-            if(user) { // user is a user of this board
-                options = calculateNoteOptions(user, note);
-            } else { // user is not a user of this board (only logged)
-                // note keep its default options
-                options = note.defaultOptions;
-            }
-            break;
-        case _enums.boardPrivacies.PRIVATE:
-            if(user) { // user is a user of this board
-                options = calculateNoteOptions(user, note);
-            } else { // user is not a user of this board (only logged)
-                // note keep its default options
-                options = note.defaultOptions;
-            }
-            break;
-        default:
-            // TODO : throw exception ?
-            options = _enums.noteOptions.NONE;
-            break;
-    }
-    return options;
-}
-
-// calculate note option for a user
-var calculateNoteOptions = function(user, note) {
-    var options = 0;
-    switch (user.userGroup) {
-        case _enums.userGroups.OWNER:
-            options = note.ownerOptions;
-            break;
-        case _enums.userGroups.ADMIN:
-            options = note.adminOptions;
-            break;
-        case _enums.userGroups.CONTRIBUTOR:
-            options = note.contributorOptions;
-            break;
-        case _enums.userGroups.VIEWER:
-            options = _enums.noteOptions.NONE;
-            break;
-        default:
-            // TODO : throw exception ?
-            options = _enums.noteOptions.NONE;
-            break;
-    }
-    if(note.lock && note.lock <= user.userGroup) {// note is locked by a user with a higher or same profile (from 1 to 4, with 1 the highest) than the current user
-        options = _enums.noteOptions.NONE;
-    }
-    return options;
-}
-
-var onPostNotes = function (context, callback) {
+var onPostNotes = function (context, callback, noteId) {
     var note = context.content;
     var fun;
     switch (note.update) {
-        case _enums.noteUpdateType.ADD: fun = _data.addNote; break;
         case _enums.noteUpdateType.POSITION: fun = _data.updateNotePosition; break;
         case _enums.noteUpdateType.VALUE: fun = _data.updateNoteValue; break;
         case _enums.noteUpdateType.RIGHTS: fun = _data.updateNoteRights; break;
@@ -406,126 +218,87 @@ var onPostNotes = function (context, callback) {
                 if (error) {
                     callback(error);
                 } else {
-                    // caching note to have its options according profile
-                    /*
-                    boardCache.addNote(note.boardId, note);
-                    */
-                    boardVersioning.update(note);
-                    callback(null, {code: 200, message: {id: note.id}});
+                    boardVersioning.update(context.session.board_id, note);
+                    callback(null, {code: 200});
                 }
             });
         cnx.end();
     }
 };
 
-var onDeleteNotes = function (context, callback) {
-    var noteId = parseInt(context.path.query.noteId);
-    var boardId = parseInt(context.path.query.boardId);
-    var note = {boardId: boardId, id: noteId};
+var onPutNotes = function (context, callback) {
+    var note = context.content;
     var cnx = _data.getMySqlConnection();
     cnx.connect();
-    _data.deleteNote(cnx, note,
+    _data.addNote(cnx, context.session.board_id, note,
+        function (error, result) {
+            if (error) {
+                callback(error);
+            } else {
+                boardVersioning.update(context.session.board_id, note);
+                callback(null, {code: 200, message: {id: note.id}});
+            }
+        });
+    cnx.end();
+};
+
+var onDeleteNotes = function (context, callback, noteId) {
+    var cnx = _data.getMySqlConnection();
+    cnx.connect();
+    _data.deleteNote(cnx, context.session.board_id, noteId,
         function(error, result) {
             if (error) {
                 callback(error);
             } else {
-                note.update = _enums.noteUpdateType.REMOVE;
-                // removing note from the board cache
-                /*
-                boardCache.removeNote(boardId, noteId);
-                */
-                boardVersioning.update(note);
+                boardVersioning.update(context.session.board_id, {
+                    id: noteId,
+                    update: _enums.noteUpdateType.REMOVE
+                });
                 callback(null, {code: 200});
             }
         });
     cnx.end();
 };
 
-var onGetLogs = function (context, callback) {
-    logger.query(null,
-        function (error, results) {
-            if (error) {
-                callback(error);
-            } else {
-                callback(null, {code: 200, message: results});
-            }
-        });
-};
-
-var onBoardsPoll = function (context, callback) {
-    var boardId = context.path.query.boardId;
-    var version = context.path.query.version;
-    var updates = boardVersioning.getUpdates(boardId, version);
-    logger.info("onBoardsPoll updates.length : " + updates.length); 
+var onGetNotesPoll = function (context, callback, version) {
+    logger.info('onGetNotesPoll board ' + context.session.board_id + ' version ' + version); 
+    var updates = boardVersioning.getUpdates(context.session.board_id, version);
+    logger.info("onGetNotesPoll updates.length : " + updates.length); 
     if (updates.length) {
         callback(null, {code: 200, message: updates});
     } else {
-        var userId = getCurrentUserId(context.cookies);
-        var client = {
-            userId: userId,
-            callback: callback
-        };
-        var cache = boardVersioning.getCache(boardId);
-        var n = cache.clients.push(client);
+        boardVersioning.addClient(context.session.board_id, context.session.user_id, callback);
         context.request.addListener('close', function () {
-            cache.clients.splice(n, 1);
+            boardVersioning.removeClient(context.session.board_id, context.session.user_id);
         });
     }
 };
-
-/*
-var boardCache = {    
-    cache: {},
-    
-    get: function (boardId) {
-        if (!(boardId in boardCache.cache)) {
-            // TODO
-            logger.error("Missing cache for board " + boardId);
-        }
-        return boardCache.cache[boardId];
-    },
-    
-    add: function (board) {
-        logger.info("Caching board " + board.id);
-        boardCache.cache[board.id] = board;
-    },
-    
-    getNote: function(boardId, noteId) {
-        board = boardCache.get(boardId);
-        for(var iNote in board.notes) {
-            if(board.notes[iNote].id == noteId)
-                return board.notes[iNote];
-        }
-        return null;
-    },
-    
-    addNote: function(boardId, note) {
-        logger.info("Adding note " + note.id + " to the cached board " + boardId);
-        var board = boardCache.get(note.boardId);
-        if(!board.notes) {
-            board.notes = [];
-        }
-        board.notes.push(note);
-    },
-    
-    removeNote: function(boardId, noteId) {
-        logger.info("Removing note " + noteId + " from the cached board " + boardId);
-        var board = boardCache.get(boardId);
-        var index = -1;
-        for(var iNote in board.notes) {
-            if(board.notes[iNote].id == noteId) {
-                index = iNote;
-                break;
-            }
-        }
-        board.notes.splice(index, 1);
-    }
-};
-*/
 
 var boardVersioning = {
     queueSize: 10,
     cache: {},
+
+    addClient: function (boardId, userId, callback) {
+        var cache = boardVersioning.getCache(boardId);
+        cache.clients.push({
+            userId: userId,
+            callback: callback
+        });
+        logger.info('added client ' + userId + ' for board ' + boardId);
+    },
+
+    removeClient: function (boardId, userId) {
+        if (boardId in boardVersioning.cache) {
+            var cache = boardVersioning.cache[boardId];
+            for (var i = 0, imax = cache.clients.length; i < imax; i++) {
+                if (cache.clients[i].userId === userId) {
+                    cache.clients.splice(i, 1);
+                    break;
+                }
+            }
+            logger.info('removed client ' + userId + ' for board ' + boardId);
+        }
+    },
 
     getCache: function (boardId) {
         if (!(boardId in boardVersioning.cache)) {
@@ -538,8 +311,9 @@ var boardVersioning = {
         return boardVersioning.cache[boardId];
     },
 
-    update: function (note) {
-        var cache = boardVersioning.getCache(note.boardId);
+    update: function (boardId, note) {
+        logger.info('version update on board ' + boardId + ' for note ' + note.id);
+        var cache = boardVersioning.getCache(boardId);
         cache.version++;
         var update = {
             version: cache.version,
@@ -549,20 +323,9 @@ var boardVersioning = {
             cache.updates.shift();
         }
         cache.updates.push(update);
-        /*
-        var cachedNote = boardCache.getNote(note.boardId, note.id);
-        var board = boardCache.get(note.boardId);
-        */
         var updates = [update];
         for (var i = 0, imax = cache.clients.length; i < imax; i++) {
-            // setting note options according to user (i.e. client) profile for the current board
-            /*
-            if(cachedNote) { // cached note must contain the different options according to profile 
-                update.note.options = calculateBoardNoteOptions(board, cache.clients[i].userId, cachedNote);
-            } else {
-                logger.error('note ' + note.id + ' not found in the cache for board ' + board.id);
-            }
-            */
+            logger.info('version notification for client ' + cache.clients[i].userId);
             cache.clients[i].callback(null, {code: 200, message: updates});
         }
         cache.clients.length = 0;
@@ -571,22 +334,9 @@ var boardVersioning = {
     getUpdates: function (boardId, version) {
         var list = [];
         var cache = boardVersioning.getCache(boardId);
-        var board = boardCache.get(boardId);
-        var userId = getCurrentUserId(context.cookies);
         if (cache.version > version) {
             for (var i = cache.updates.length - 1; i >= 0; i--) {
                 if (cache.updates[i].version > version) {
-                    // setting note options according to user (i.e. client) profile for the current board
-                    /*
-                    var note = cache.updates[i].note;
-                    var cachedNote = boardCache.getNote(boardId, note.id);
-                    if(cachedNote) { // cached note must contain the different options according to profile 
-                        note.options = calculateBoardNoteOptions(board, userId, cachedNote);
-                        logger.info("options for updated note " + note.id + " : " + note.options);
-                    } else {
-                        logger.error('note ' + note.id + ' not found in the cache for board ' + boardId);
-                    }
-                    */
                     list.push(cache.updates[i])
                 } else {
                     break;
@@ -595,6 +345,17 @@ var boardVersioning = {
         }
         return list;
     }
+};
+
+var onGetLogs = function (context, callback) {
+    logger.query(null,
+        function (error, results) {
+            if (error) {
+                callback(error);
+            } else {
+                callback(null, {code: 200, message: results});
+            }
+        });
 };
 
 _http.createServer(listener).listen(settings.port);
