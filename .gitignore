@@ -17,3 +17,8 @@ npm-debug.log
 node_modules/
 node.exe
 npm.cmd
+bin/
+lib/
+share/
+
+
